@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define MAX_CACHE_SIZE 100
@@ -13,7 +14,7 @@ typedef struct CacheEntry {
     int value;
     int dirty;          // For write-back
     int valid;          // Valid bit
-    int last_modified;  // For write-through timing
+    time_t last_modified;  // For write-through timing
 } CacheEntry;
 
 // Cache structure
@@ -29,17 +30,18 @@ typedef struct Cache {
 Cache* create_cache(int capacity);
 void destroy_cache(Cache* cache);
 int read(Cache* cache, int key);
-void write(Cache* cache, int key, int value);
+int write(Cache* cache, int key, int value);
 
 // Write policy functions
 int write_through(Cache* cache, int key, int value);
 int write_back(Cache* cache, int key, int value);
 int write_around(Cache* cache, int key, int value);
+int write_back_no_allocate(Cache* cache, int key, int value);
 
 // Utility functions
 void print_cache_contents(Cache* cache, const char* message);
 void test_cache(Cache* cache, const char* policy_name);
-void run_interactive_mode();
-void display_menu();
+void run_interactive_mode(Cache* cache);
+void display_menu(void);
 
 #endif // CACHE_WRITE_H 

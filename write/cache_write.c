@@ -53,11 +53,11 @@ int read(Cache* cache, int key) {
 }
 
 // Write a key-value pair in the cache
-void write(Cache* cache, int key, int value) {
+int write(Cache* cache, int key, int value) {
     if (!cache || !cache->write_policy) {
-        return;
+        return 0;
     }
-    cache->write_policy(cache, key, value);
+    return cache->write_policy(cache, key, value);
 }
 
 // Write-Through Policy
@@ -159,6 +159,7 @@ int write_back(Cache* cache, int key, int value) {
 
 // Write-Around Policy
 int write_around(Cache* cache, int key, int value) {
+    (void)value; // Suppress unused parameter warning
     int index = find_key(cache, key);
     
     // If key exists in cache, invalidate it
@@ -172,17 +173,36 @@ int write_around(Cache* cache, int key, int value) {
     return 1;
 }
 
+// Write-Back with No-Write-Allocate
+int write_back_no_allocate(Cache* cache, int key, int value) {
+    // First, check if the key exists in cache
+    int index = find_key(cache, key);
+    
+    if (index != -1) {
+        // Key exists in cache, update it
+        cache->entries[index].value = value;
+        cache->entries[index].dirty = 1;
+        cache->entries[index].last_modified = time(NULL);
+        printf("Write-Back No-Allocate: Updated cache for key %d (marked dirty)\n", key);
+        return 1;
+    }
+    
+    // Key doesn't exist in cache, write directly to memory
+    printf("Write-Back No-Allocate: Written directly to memory for key %d (no cache allocation)\n", key);
+    return 0;
+}
+
 void print_cache_contents(Cache* cache, const char* message) {
     printf("\n%s:\n", message);
     printf("Key\tValue\tDirty\tValid\tLast Modified\n");
     printf("--------------------------------------------------------\n");
     for (int i = 0; i < cache->size; i++) {
-        printf("%d\t%d\t%d\t%d\t%d\n",
+        printf("%d\t%d\t%d\t%d\t%ld\n",
                cache->entries[i].key,
                cache->entries[i].value,
                cache->entries[i].dirty,
                cache->entries[i].valid,
-               cache->entries[i].last_modified);
+               (long)cache->entries[i].last_modified);
     }
     printf("--------------------------------------------------------\n");
 }
@@ -236,15 +256,15 @@ void display_menu() {
     printf("1. Write-Through\n");
     printf("2. Write-Back\n");
     printf("3. Write-Around\n");
-    printf("4. Run all policies\n");
-    printf("5. Exit\n");
-    printf("Enter your choice (1-5): ");
+    printf("4. Write-Back with No-Write-Allocate\n");
+    printf("5. Run all policies\n");
+    printf("6. Exit\n");
+    printf("Enter your choice (1-6): ");
 }
 
-void run_interactive_mode() {
+void run_interactive_mode(Cache* cache) {
     int choice;
     int capacity;
-    Cache* cache = NULL;
     
     printf("Enter cache capacity (1-%d): ", MAX_CACHE_SIZE);
     scanf("%d", &capacity);
@@ -258,14 +278,14 @@ void run_interactive_mode() {
         display_menu();
         scanf("%d", &choice);
         
-        if (choice == 5) {
+        if (choice == 6) {
             if (cache) {
                 destroy_cache(cache);
             }
             break;
         }
         
-        if (choice == 4) {
+        if (choice == 5) {
             // Run all policies
             Cache* write_through_cache = create_cache(capacity);
             write_through_cache->write_policy = write_through;
@@ -281,6 +301,11 @@ void run_interactive_mode() {
             write_around_cache->write_policy = write_around;
             test_cache(write_around_cache, "Write-Around");
             destroy_cache(write_around_cache);
+            
+            Cache* write_back_no_allocate_cache = create_cache(capacity);
+            write_back_no_allocate_cache->write_policy = write_back_no_allocate;
+            test_cache(write_back_no_allocate_cache, "Write-Back with No-Write-Allocate");
+            destroy_cache(write_back_no_allocate_cache);
             
             continue;
         }
@@ -309,6 +334,10 @@ void run_interactive_mode() {
                 cache->write_policy = write_around;
                 test_cache(cache, "Write-Around");
                 break;
+            case 4:
+                cache->write_policy = write_back_no_allocate;
+                test_cache(cache, "Write-Back with No-Write-Allocate");
+                break;
             default:
                 printf("Invalid choice. Please try again.\n");
                 break;
@@ -320,7 +349,8 @@ int main() {
     printf("Welcome to Cache Write Policy Simulator\n");
     printf("=====================================\n");
     
-    run_interactive_mode();
+    Cache* cache = NULL;
+    run_interactive_mode(cache);
     
     return 0;
 } 
