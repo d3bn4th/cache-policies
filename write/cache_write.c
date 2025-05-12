@@ -253,6 +253,69 @@ int write_back_no_allocate(Cache* cache, int key, int value) {
     return 1;
 }
 
+// Write-Allocate Policy (with Write-Back)
+int write_allocate(Cache* cache, int key, int value) {
+    int index = find_key(cache, key);
+    
+    // If key exists, update value and mark as dirty (like write-back)
+    if (index != -1) {
+        cache->entries[index].value = value;
+        cache->entries[index].dirty = 1;
+        cache->entries[index].last_modified = cache->current_time++;
+        printf("Write-Allocate: Updated cache for key %d (marked dirty)\n", key);
+        return 1;
+    }
+    
+    // Key doesn't exist - this is where write-allocate differs from no-write-allocate
+    // First, read the value from memory (simulating loading the block)
+    memory_read(key);  // We read from memory to load the block, but we'll use the new value anyway
+    printf("Write-Allocate: Cache miss for key %d, loading block from memory\n", key);
+    
+    // Then add the block to cache (allocate) and update with new value
+    if (cache->size < cache->capacity) {
+        // Cache has space
+        cache->entries[cache->size].key = key;
+        cache->entries[cache->size].value = value;  // Use the new value
+        cache->entries[cache->size].valid = 1;
+        cache->entries[cache->size].dirty = 1;  // Mark dirty since we're modifying it
+        cache->entries[cache->size].last_modified = cache->current_time++;
+        cache->size++;
+        printf("Write-Allocate: Allocated new cache entry for key %d and updated value (marked dirty)\n", key);
+        return 1;
+    }
+    
+    // No space in cache, need to evict
+    int evict_index = 0;
+    int oldest_time = cache->entries[0].last_modified;
+    
+    for (int i = 1; i < cache->size; i++) {
+        if (cache->entries[i].last_modified < oldest_time) {
+            oldest_time = cache->entries[i].last_modified;
+            evict_index = i;
+        }
+    }
+    
+    // If evicted entry is dirty, write it back to memory
+    if (cache->entries[evict_index].dirty) {
+        memory_write(cache->entries[evict_index].key, cache->entries[evict_index].value);
+        printf("Write-Allocate: Writing back dirty entry for key %d to memory\n", 
+               cache->entries[evict_index].key);
+    } else {
+        printf("Write-Allocate: Evicted clean entry for key %d (no memory write needed)\n",
+               cache->entries[evict_index].key);
+    }
+    
+    // Replace with new entry
+    cache->entries[evict_index].key = key;
+    cache->entries[evict_index].value = value;
+    cache->entries[evict_index].valid = 1;
+    cache->entries[evict_index].dirty = 1;  // Mark dirty since we're modifying it
+    cache->entries[evict_index].last_modified = cache->current_time++;
+    printf("Write-Allocate: Allocated cache entry for key %d after eviction (marked dirty)\n", key);
+    
+    return 1;
+}
+
 void print_cache_contents(Cache* cache, const char* message) {
     printf("\n%s:\n", message);
     printf("Key\tValue\tDirty\tValid\tLast Modified\n");
@@ -340,9 +403,10 @@ void display_menu() {
     printf("2. Write-Back\n");
     printf("3. Write-Around\n");
     printf("4. Write-Back with No-Write-Allocate\n");
-    printf("5. Run all policies\n");
-    printf("6. Exit\n");
-    printf("Enter your choice (1-6): ");
+    printf("5. Write-Allocate (with Write-Back)\n");
+    printf("6. Run all policies\n");
+    printf("7. Exit\n");
+    printf("Enter your choice (1-7): ");
 }
 
 void run_interactive_mode(Cache* cache) {
@@ -364,14 +428,14 @@ void run_interactive_mode(Cache* cache) {
         display_menu();
         scanf("%d", &choice);
         
-        if (choice == 6) {
+        if (choice == 7) {  // Updated exit choice
             if (cache) {
                 destroy_cache(cache);
             }
             break;
         }
         
-        if (choice == 5) {
+        if (choice == 6) {  // Updated "Run all" choice
             // Run all policies
             Cache* write_through_cache = create_cache(capacity);
             write_through_cache->write_policy = write_through;
@@ -392,6 +456,11 @@ void run_interactive_mode(Cache* cache) {
             write_back_no_allocate_cache->write_policy = write_back_no_allocate;
             test_cache(write_back_no_allocate_cache, "Write-Back with No-Write-Allocate");
             destroy_cache(write_back_no_allocate_cache);
+            
+            Cache* write_allocate_cache = create_cache(capacity);
+            write_allocate_cache->write_policy = write_allocate;
+            test_cache(write_allocate_cache, "Write-Allocate (with Write-Back)");
+            destroy_cache(write_allocate_cache);
             
             continue;
         }
@@ -426,6 +495,10 @@ void run_interactive_mode(Cache* cache) {
             case 4:
                 cache->write_policy = write_back_no_allocate;
                 test_cache(cache, "Write-Back with No-Write-Allocate");
+                break;
+            case 5:  // New option for Write-Allocate
+                cache->write_policy = write_allocate;
+                test_cache(cache, "Write-Allocate (with Write-Back)");
                 break;
             default:
                 printf("Invalid choice. Please try again.\n");

@@ -49,6 +49,7 @@ int write_through(Cache* cache, int key, int value);
 int write_back(Cache* cache, int key, int value);
 int write_around(Cache* cache, int key, int value);
 int write_back_no_allocate(Cache* cache, int key, int value);
+int write_allocate(Cache* cache, int key, int value);
 
 // Utility functions
 void print_cache_contents(Cache* cache, const char* message);
