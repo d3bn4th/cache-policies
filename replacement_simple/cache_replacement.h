@@ -6,23 +6,34 @@
 #include <time.h>
 
 #define MAX_CACHE_SIZE 100
+#define HASH_SIZE 1000  // Size of hash table, should be larger than cache size
 
-// Cache entry structure
-typedef struct CacheEntry {
+// Node structure for doubly linked list
+typedef struct LRUNode {
     int key;
     int value;
-    int frequency;      // For LFU
-    int last_used;      // For LRU
-    int time_added;     // For FIFO
-} CacheEntry;
+    struct LRUNode* prev;
+    struct LRUNode* next;
+    int frequency;      // For LFU policy
+    int time_added;     // For FIFO policy
+} LRUNode;
+
+// Hash entry structure
+typedef struct HashEntry {
+    int key;
+    LRUNode* node;
+    struct HashEntry* next;  // For handling collisions
+} HashEntry;
 
 // Cache structure
 typedef struct Cache {
-    CacheEntry* entries;
+    LRUNode* head;      // Most recently used
+    LRUNode* tail;      // Least recently used
+    HashEntry** hash_table;
     int size;
     int capacity;
-    int current_time;
-    int (*replacement_policy)(struct Cache*);  // Function pointer for replacement policy
+    int current_time;   // For tracking insertion order
+    int (*replacement_policy)(struct Cache*);
 } Cache;
 
 // Function declarations

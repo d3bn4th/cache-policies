@@ -1,15 +1,20 @@
 CC = gcc
-CFLAGS = -Wall -Wextra
+CFLAGS = -Wall -Wextra -I.
+CACHE_SRCS = replacement_algorithms/lru_cache.c \
+             replacement_algorithms/lfu_cache.c \
+             replacement_algorithms/fifo_cache.c \
+             replacement_algorithms/random_cache.c
+CACHE_OBJS = $(CACHE_SRCS:.c=.o)
 
-all: replacement/write_policy replacement/replacement_policy
+all: test_cache_algorithms
 
-replacement/write_policy: write/cache_write.c write/cache_write.h
-	$(CC) $(CFLAGS) -o $@ write/cache_write.c
+test_cache_algorithms: test_cache_algorithms.c $(CACHE_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
 
-replacement/replacement_policy: replacement/cache_replacement.c replacement/cache_replacement.h
-	$(CC) $(CFLAGS) -o $@ replacement/cache_replacement.c
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f replacement/write_policy replacement/replacement_policy
+	rm -f test_cache_algorithms $(CACHE_OBJS)
 
 .PHONY: all clean 

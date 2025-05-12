@@ -1,5 +1,42 @@
 #include "cache_write.h"
 
+// Global memory for simulation
+Memory main_memory;
+
+// Initialize memory
+void init_memory() {
+    for (int i = 0; i < MEMORY_SIZE; i++) {
+        main_memory.data[i] = 0;
+        main_memory.initialized[i] = 0;
+    }
+}
+
+// Memory read operation
+int memory_read(int address) {
+    if (address < 0 || address >= MEMORY_SIZE) {
+        printf("Memory error: Address %d out of bounds\n", address);
+        return -1;
+    }
+    
+    if (!main_memory.initialized[address]) {
+        printf("Memory notice: Reading uninitialized address %d\n", address);
+    }
+    
+    return main_memory.data[address];
+}
+
+// Memory write operation
+void memory_write(int address, int value) {
+    if (address < 0 || address >= MEMORY_SIZE) {
+        printf("Memory error: Address %d out of bounds\n", address);
+        return;
+    }
+    
+    main_memory.data[address] = value;
+    main_memory.initialized[address] = 1;
+    printf("Memory write: Address %d = %d\n", address, value);
+}
+
 // Create a new cache with specified capacity
 Cache* create_cache(int capacity) {
     if (capacity <= 0 || capacity > MAX_CACHE_SIZE) {
@@ -28,6 +65,15 @@ Cache* create_cache(int capacity) {
 // Destroy the cache and free memory
 void destroy_cache(Cache* cache) {
     if (cache) {
+        // Write back any dirty entries before destroying
+        if (cache->write_policy == write_back || cache->write_policy == write_back_no_allocate) {
+            for (int i = 0; i < cache->size; i++) {
+                if (cache->entries[i].valid && cache->entries[i].dirty) {
+                    memory_write(cache->entries[i].key, cache->entries[i].value);
+                    printf("Cache destruction: Writing back dirty entry for key %d\n", cache->entries[i].key);
+                }
+            }
+        }
         free(cache->entries);
         free(cache);
     }
@@ -47,9 +93,17 @@ static int find_key(Cache* cache, int key) {
 int read(Cache* cache, int key) {
     int index = find_key(cache, key);
     if (index != -1) {
+        printf("Cache hit: Reading key %d from cache\n", key);
         return cache->entries[index].value;
     }
-    return -1;  // Key not found
+    
+    // Cache miss - read from memory
+    printf("Cache miss: Reading key %d from memory\n", key);
+    int value = memory_read(key);
+    
+    // For a read miss, we might want to load the value into cache
+    // This is a simplified implementation without read allocation policy
+    return value;
 }
 
 // Write a key-value pair in the cache
@@ -64,11 +118,14 @@ int write(Cache* cache, int key, int value) {
 int write_through(Cache* cache, int key, int value) {
     int index = find_key(cache, key);
     
+    // Always write to memory first
+    memory_write(key, value);
+    
     // If key exists, update value
     if (index != -1) {
         cache->entries[index].value = value;
         cache->entries[index].last_modified = cache->current_time++;
-        printf("Write-Through: Updated cache and memory for key %d\n", key);
+        printf("Write-Through: Updated cache for key %d\n", key);
         return 1;
     }
 
@@ -77,16 +134,14 @@ int write_through(Cache* cache, int key, int value) {
         cache->entries[cache->size].key = key;
         cache->entries[cache->size].value = value;
         cache->entries[cache->size].valid = 1;
-        cache->entries[cache->size].dirty = 0;
+        cache->entries[cache->size].dirty = 0;  // Not dirty since memory is updated
         cache->entries[cache->size].last_modified = cache->current_time++;
         cache->size++;
-        printf("Write-Through: Added to cache and memory for key %d\n", key);
+        printf("Write-Through: Added to cache for key %d\n", key);
         return 1;
     }
 
     // Cache is full, need to evict an entry
-    // For write-through, we can use any eviction policy
-    // Here we'll use a simple FIFO-like approach
     int evict_index = 0;
     int oldest_time = cache->entries[0].last_modified;
     
@@ -97,12 +152,12 @@ int write_through(Cache* cache, int key, int value) {
         }
     }
 
+    printf("Write-Through: Evicted old entry for key %d\n", cache->entries[evict_index].key);
     cache->entries[evict_index].key = key;
     cache->entries[evict_index].value = value;
     cache->entries[evict_index].valid = 1;
-    cache->entries[evict_index].dirty = 0;
+    cache->entries[evict_index].dirty = 0;  // Not dirty since memory is updated
     cache->entries[evict_index].last_modified = cache->current_time++;
-    printf("Write-Through: Evicted old entry and wrote to cache and memory for key %d\n", key);
     return 1;
 }
 
@@ -113,7 +168,7 @@ int write_back(Cache* cache, int key, int value) {
     // If key exists, update value and mark as dirty
     if (index != -1) {
         cache->entries[index].value = value;
-        cache->entries[index].dirty = 1;
+        cache->entries[index].dirty = 1;  // Mark as dirty, needs to be written to memory later
         cache->entries[index].last_modified = cache->current_time++;
         printf("Write-Back: Updated cache for key %d (marked dirty)\n", key);
         return 1;
@@ -124,7 +179,7 @@ int write_back(Cache* cache, int key, int value) {
         cache->entries[cache->size].key = key;
         cache->entries[cache->size].value = value;
         cache->entries[cache->size].valid = 1;
-        cache->entries[cache->size].dirty = 1;
+        cache->entries[cache->size].dirty = 1;  // Mark as dirty, needs to be written to memory later
         cache->entries[cache->size].last_modified = cache->current_time++;
         cache->size++;
         printf("Write-Back: Added to cache for key %d (marked dirty)\n", key);
@@ -144,32 +199,36 @@ int write_back(Cache* cache, int key, int value) {
 
     // If evicted entry is dirty, write it back to memory
     if (cache->entries[evict_index].dirty) {
+        memory_write(cache->entries[evict_index].key, cache->entries[evict_index].value);
         printf("Write-Back: Writing back dirty entry for key %d to memory\n", 
+               cache->entries[evict_index].key);
+    } else {
+        printf("Write-Back: Evicted clean entry for key %d (no memory write needed)\n",
                cache->entries[evict_index].key);
     }
 
     cache->entries[evict_index].key = key;
     cache->entries[evict_index].value = value;
     cache->entries[evict_index].valid = 1;
-    cache->entries[evict_index].dirty = 1;
+    cache->entries[evict_index].dirty = 1;  // Mark as dirty for new entry
     cache->entries[evict_index].last_modified = cache->current_time++;
-    printf("Write-Back: Evicted old entry and wrote to cache for key %d (marked dirty)\n", key);
     return 1;
 }
 
 // Write-Around Policy
 int write_around(Cache* cache, int key, int value) {
-    (void)value; // Suppress unused parameter warning
+    // Write directly to memory, bypassing cache
+    memory_write(key, value);
+    
     int index = find_key(cache, key);
     
-    // If key exists in cache, invalidate it
+    // If key exists in cache, invalidate it since memory now has newer value
     if (index != -1) {
         cache->entries[index].valid = 0;
         printf("Write-Around: Invalidated cache entry for key %d\n", key);
     }
 
-    // Write directly to memory
-    printf("Write-Around: Writing directly to memory for key %d\n", key);
+    printf("Write-Around: Bypassed cache, wrote directly to memory for key %d\n", key);
     return 1;
 }
 
@@ -179,17 +238,19 @@ int write_back_no_allocate(Cache* cache, int key, int value) {
     int index = find_key(cache, key);
     
     if (index != -1) {
-        // Key exists in cache, update it
+        // Key exists in cache, update it and mark as dirty
         cache->entries[index].value = value;
         cache->entries[index].dirty = 1;
-        cache->entries[index].last_modified = time(NULL);
+        cache->entries[index].last_modified = cache->current_time++;
         printf("Write-Back No-Allocate: Updated cache for key %d (marked dirty)\n", key);
         return 1;
     }
     
     // Key doesn't exist in cache, write directly to memory
-    printf("Write-Back No-Allocate: Written directly to memory for key %d (no cache allocation)\n", key);
-    return 0;
+    // In no-write-allocate, we don't add the entry to cache on write miss
+    memory_write(key, value);
+    printf("Write-Back No-Allocate: Cache miss, written directly to memory for key %d\n", key);
+    return 1;
 }
 
 void print_cache_contents(Cache* cache, const char* message) {
@@ -207,8 +268,24 @@ void print_cache_contents(Cache* cache, const char* message) {
     printf("--------------------------------------------------------\n");
 }
 
+void print_memory_contents(int start_addr, int end_addr, const char* message) {
+    printf("\n%s:\n", message);
+    printf("Address\tValue\tInitialized\n");
+    printf("--------------------------------------------------------\n");
+    
+    for (int addr = start_addr; addr <= end_addr; addr++) {
+        if (main_memory.initialized[addr]) {
+            printf("%d\t%d\t%s\n", addr, main_memory.data[addr], "Yes");
+        }
+    }
+    printf("--------------------------------------------------------\n");
+}
+
 void test_cache(Cache* cache, const char* policy_name) {
     printf("\nTesting %s policy:\n", policy_name);
+    
+    // Initialize memory for this test
+    init_memory();
     
     // Show initial empty cache state
     print_cache_contents(cache, "Initial cache state (empty)");
@@ -218,13 +295,17 @@ void test_cache(Cache* cache, const char* policy_name) {
     write(cache, 2, 200);
     write(cache, 3, 300);
     
-    // Show cache state after initial writes
+    // Show cache and memory state after initial writes
     print_cache_contents(cache, "Cache state after initial writes");
+    print_memory_contents(1, 10, "Memory state after initial writes");
     
     // Test reads
     printf("\nTesting reads:\n");
     printf("Read key 1: %d\n", read(cache, 1));
     printf("Read key 2: %d\n", read(cache, 2));
+    
+    // Test read miss
+    printf("Read key 10 (should be miss): %d\n", read(cache, 10));
     
     // Show cache state after reads
     print_cache_contents(cache, "Cache state after reads");
@@ -233,8 +314,9 @@ void test_cache(Cache* cache, const char* policy_name) {
     printf("\nTesting write to existing key:\n");
     write(cache, 1, 150);
     
-    // Show cache state after update
+    // Show cache and memory state after update
     print_cache_contents(cache, "Cache state after update");
+    print_memory_contents(1, 10, "Memory state after update");
     
     // Fill cache to capacity
     write(cache, 4, 400);
@@ -247,8 +329,9 @@ void test_cache(Cache* cache, const char* policy_name) {
     printf("\nTriggering eviction by writing key 6:\n");
     write(cache, 6, 600);
     
-    // Show cache state after eviction
+    // Show cache and memory state after eviction
     print_cache_contents(cache, "Cache state after eviction");
+    print_memory_contents(1, 10, "Memory state after eviction");
 }
 
 void display_menu() {
@@ -273,6 +356,9 @@ void run_interactive_mode(Cache* cache) {
         printf("Invalid capacity. Using default capacity of 5.\n");
         capacity = 5;
     }
+    
+    // Initialize memory at the start
+    init_memory();
     
     while (1) {
         display_menu();
@@ -321,6 +407,9 @@ void run_interactive_mode(Cache* cache) {
             break;
         }
         
+        // Reset memory for each new test
+        init_memory();
+        
         switch (choice) {
             case 1:
                 cache->write_policy = write_through;
@@ -348,6 +437,9 @@ void run_interactive_mode(Cache* cache) {
 int main() {
     printf("Welcome to Cache Write Policy Simulator\n");
     printf("=====================================\n");
+    
+    // Initialize memory at program start
+    init_memory();
     
     Cache* cache = NULL;
     run_interactive_mode(cache);
